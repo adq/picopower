@@ -1,23 +1,14 @@
 import machine
 from machine import I2C
-import network
-import time
-import rp2
-import json
-from umqtt.simple import MQTTClient
-import secrets
+import asyncio
+import mqtt_async
+import cfgsecrets
 
 LIGHT_SENSOR_I2C_ADDRESS = 0x23
 LIGHT_SENSOR_PULSE_THRESHOLD = 40
-WIFI_SSID = secrets.WIFI_SSID
-WIFI_PASSWORD = secrets.WIFI_PASSWORD
-MQTT_HOST = secrets.MQTT_HOST
-MQTT_STATE_TOPIC = 'homeassistant/sensor/picopower/state'
-MQTT_CONFIG_TOPIC = 'homeassistant/sensor/picopower/config'
-MQTT_CLIENT_ID = 'picopower'
 
-MQTT_PUBLISH_EVERY_MS = 30 * 1000
-SLEEP_INTERVAL_MS = 100
+MQTT_PUBLISH_EVERY_SECS = 30
+SENSOR_SLEEP_INTERVAL_MS = 100
 
 ENERGY_CONFIG = {"device_class": "energy",
                  "state_class": "total_increasing",
@@ -31,66 +22,76 @@ ENERGY_CONFIG = {"device_class": "energy",
 pulse_counter = 0
 
 
-def main():
+async def sensor():
     global pulse_counter
 
-    # i2c setup
+    # hardware setup
     sda = machine.Pin(20)
     scl = machine.Pin(21)
     i2c = I2C(0, sda=sda, scl=scl, freq=400000)
 
     led = machine.Pin("LED", machine.Pin.OUT)
 
-    # continuous measurement, low resolution mode, 4lx, ~16ms measurement time
-    i2c.writeto(LIGHT_SENSOR_I2C_ADDRESS, bytes([0x13]))
-
-    # Connect to WiFi
-    print("Connecting to WIFI")
-    rp2.country('GB')
-    wlan = network.WLAN(network.STA_IF)
-    wlan.active(True)
-    wlan.connect(WIFI_SSID, WIFI_PASSWORD)
-    while not wlan.isconnected():
-        print(wlan.status())
-        print('Waiting for connection...')
-        time.sleep(1)
-    print("Connected to WiFi")
-
-    # Initialize our MQTTClient and connect to the MQTT server
-    mqtt_client = MQTTClient(client_id=MQTT_CLIENT_ID, server=MQTT_HOST)
-    mqtt_client.connect()
-    print("Connected to MQTT")
-    mqtt_client.publish(MQTT_CONFIG_TOPIC, json.dumps(ENERGY_CONFIG))
-
-    last_mqtt_publish = 0
-    current_state = 0
     while True:
-        # read from sensor
-        b = i2c.readfrom(LIGHT_SENSOR_I2C_ADDRESS, 2)
-        v = (b[0] << 8) | b[1]
-
-        # detect+count pulses!
-        if v >= LIGHT_SENSOR_PULSE_THRESHOLD and not current_state:
-            pulse_counter += 1
-            current_state = 1
-            led.on()
-
-        elif v < LIGHT_SENSOR_PULSE_THRESHOLD and current_state:
-            current_state = 0
+        try:
             led.off()
 
-        # sleep/ send counter to mqtt
-        if (time.ticks_ms() - last_mqtt_publish) > MQTT_PUBLISH_EVERY_MS:
-            mqtt_client.publish(MQTT_STATE_TOPIC, str(pulse_counter))
-            last_mqtt_publish = time.ticks_ms()
-        else:
-            time.sleep_ms(SLEEP_INTERVAL_MS)
+            # continuous measurement, low resolution mode, 4lx, ~16ms measurement time
+            i2c.writeto(LIGHT_SENSOR_I2C_ADDRESS, bytes([0x13]))
+
+            current_state = 0
+            while True:
+                # read from sensor
+                b = i2c.readfrom(LIGHT_SENSOR_I2C_ADDRESS, 2)
+                v = (b[0] << 8) | b[1]
+
+                # detect+count pulses!
+                if v >= LIGHT_SENSOR_PULSE_THRESHOLD and not current_state:
+                    pulse_counter += 1
+                    current_state = 1
+                    led.on()
+
+                elif v < LIGHT_SENSOR_PULSE_THRESHOLD and current_state:
+                    current_state = 0
+                    led.off()
+
+                await asyncio.sleep_ms(SENSOR_SLEEP_INTERVAL_MS)
+
+        except Exception as ex:
+            print("SENSORFAIL")
+            print(ex)
+            await asyncio.sleep(5)
 
 
-# main loop - keep running forever
-while True:
-    try:
-        main()
-    except Exception as ex:
-        print(ex)
-    time.sleep(5)
+async def mqtt():
+    global pulse_counter
+
+    mqtt_async.config['ssid'] = cfgsecrets.WIFI_SSID
+    mqtt_async.config['wifi_pw'] = cfgsecrets.WIFI_PASSWORD
+    mqtt_async.config['server'] = cfgsecrets.MQTT_HOST
+
+    while True:
+        try:
+            mqc = mqtt_async.MQTTClient(mqtt_async.config)
+            await mqc.connect()
+            print("MQTT connected")
+
+            while True:
+                await mqc.publish('homeassistant/sensor/picopower/config', ENERGY_CONFIG)
+                await mqc.publish("homeassistant/sensor/picopower/state", str(pulse_counter))
+                await asyncio.sleep(MQTT_PUBLISH_EVERY_SECS)
+
+        except Exception as ex:
+            print("MQTTFAIL")
+            print(ex)
+            await asyncio.sleep(5)
+
+
+async def main():
+    what = [
+        sensor(),
+        mqtt()
+    ]
+    await asyncio.gather(*what)
+
+asyncio.run(main())
