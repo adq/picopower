@@ -1,3 +1,4 @@
+import json
 import machine
 from machine import I2C
 import asyncio
@@ -10,13 +11,13 @@ LIGHT_SENSOR_PULSE_THRESHOLD = 40
 MQTT_PUBLISH_EVERY_SECS = 30
 SENSOR_SLEEP_INTERVAL_MS = 100
 
-ENERGY_CONFIG = {"device_class": "energy",
-                 "state_class": "total_increasing",
-                 "state_topic": "homeassistant/sensor/picopower/state",
-                 "unit_of_measurement": "Wh",
-                 "unique_id": "picopowenergy",
-                 "device": {"identifiers": ["picopower"], "name": "Pico Power"}
-                }
+ENERGY_CONFIG = json.dumps({"device_class": "energy",
+                            "state_class": "total_increasing",
+                            "state_topic": "homeassistant/sensor/picopower/state",
+                            "unit_of_measurement": "Wh",
+                            "unique_id": "picopowenergy",
+                            "device": {"identifiers": ["picopower"], "name": "Pico Power"}
+                            })
 
 
 pulse_counter = 0
