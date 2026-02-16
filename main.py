@@ -2,8 +2,10 @@ import json
 import machine
 from machine import I2C
 import asyncio
-import mqtt_async
+from umqtt.robust import MQTTClient
 import cfgsecrets
+import socket
+import time
 
 LIGHT_SENSOR_I2C_ADDRESS = 0x23
 LIGHT_SENSOR_PULSE_THRESHOLD = 40
@@ -21,6 +23,25 @@ ENERGY_CONFIG = json.dumps({"device_class": "energy",
 
 
 pulse_counter = 0
+
+
+def send_syslog(message, port=514, hostname="picopower", appname="main", procid="-", msgid="-"):
+    print(message)
+
+    syslog_addr = ('255.255.255.255', port)
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+    pri = 13  # user.notice
+    version = 1
+    timestamp = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+    # If timezone is missing, add 'Z' for UTC
+    if not timestamp.endswith('Z') and not timestamp[-5:].startswith(('+', '-')):
+        timestamp += 'Z'
+    syslog_msg = f"<{pri}>{version} {timestamp} {hostname} {appname} {procid} {msgid} - {message}".encode('utf-8')
+    try:
+        sock.sendto(syslog_msg, syslog_addr)
+    finally:
+        sock.close()
 
 
 async def sensor():
@@ -59,32 +80,33 @@ async def sensor():
                 await asyncio.sleep_ms(SENSOR_SLEEP_INTERVAL_MS)
 
         except Exception as ex:
-            print("SENSORFAIL")
-            print(ex)
+            send_syslog(f"Sensor error: {ex}")
             await asyncio.sleep(5)
 
 
 async def mqtt():
     global pulse_counter
 
-    mqtt_async.config['ssid'] = cfgsecrets.WIFI_SSID
-    mqtt_async.config['wifi_pw'] = cfgsecrets.WIFI_PASSWORD
-    mqtt_async.config['server'] = cfgsecrets.MQTT_HOST
-
+    mqc = None
     while True:
         try:
-            mqc = mqtt_async.MQTTClient(mqtt_async.config)
-            await mqc.connect()
-            print("MQTT connected")
+            mqc = MQTTClient("picopower", cfgsecrets.MQTT_HOST, keepalive=60)
+            mqc.connect()
+            send_syslog("MQTT connected")
 
             while True:
-                await mqc.publish('homeassistant/sensor/picopower/config', ENERGY_CONFIG)
-                await mqc.publish("homeassistant/sensor/picopower/state", str(pulse_counter))
+                mqc.publish('homeassistant/sensor/picopower/config', ENERGY_CONFIG)
+                mqc.publish("homeassistant/sensor/picopower/state", str(pulse_counter))
                 await asyncio.sleep(MQTT_PUBLISH_EVERY_SECS)
 
         except Exception as ex:
-            print("MQTTFAIL")
-            print(ex)
+            if mqc:
+                try:
+                    mqc.sock.close()
+                except Exception:
+                    pass
+                mqc = None
+            send_syslog(f"MQTT error: {ex}")
             await asyncio.sleep(5)
 
 

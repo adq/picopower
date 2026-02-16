@@ -1,0 +1,6 @@
+#!/bin/sh
+
+rshell cp -r cfgsecrets.py async_mqtt_client.py lib.py /pyboard
+rshell cp main.py /pyboard
+
+# rshell cp main.py /pyboard/tmain.py
