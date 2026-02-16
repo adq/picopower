@@ -2,9 +2,9 @@ import json
 import machine
 from machine import I2C
 import asyncio
-from umqtt.robust import MQTTClient
+from async_mqtt_client import AsyncMQTTClient
+from lib import send_syslog
 import cfgsecrets
-import socket
 import time
 import network
 import utime
@@ -37,6 +37,7 @@ async def sensor():
     i2c = I2C(0, sda=sda, scl=scl, freq=400000)
 
     led = machine.Pin("LED", machine.Pin.OUT)
+    send_syslog("Sensor initialized: I2C on pins 20/21, monitoring light pulses")
 
     while True:
         try:
@@ -44,6 +45,7 @@ async def sensor():
 
             # continuous measurement, low resolution mode, 4lx, ~16ms measurement time
             i2c.writeto(LIGHT_SENSOR_I2C_ADDRESS, bytes([0x13]))
+            send_syslog("Sensor started: continuous measurement mode")
 
             current_state = 0
             while True:
@@ -64,7 +66,7 @@ async def sensor():
                 await asyncio.sleep_ms(SENSOR_SLEEP_INTERVAL_MS)
 
         except Exception as ex:
-            send_syslog(f"Sensor error: {ex}")
+            send_syslog(f"Sensor error: {ex}, restarting in 5 seconds")
             await asyncio.sleep(5)
 
 
@@ -72,25 +74,27 @@ async def mqtt():
     global pulse_counter
 
     mqc = None
+    send_syslog(f"MQTT client starting: connecting to {cfgsecrets.MQTT_HOST}")
     while True:
         try:
-            mqc = MQTTClient("picopower", cfgsecrets.MQTT_HOST, keepalive=60)
-            mqc.connect()
-            send_syslog("MQTT connected")
+            mqc = AsyncMQTTClient("picopower", cfgsecrets.MQTT_HOST, keepalive=60)
+            await mqc.connect()
+            send_syslog("MQTT connected successfully")
 
             while True:
-                mqc.publish('homeassistant/sensor/picopower/config', ENERGY_CONFIG)
-                mqc.publish("homeassistant/sensor/picopower/state", str(pulse_counter))
+                await mqc.publish_string('homeassistant/sensor/picopower/config', ENERGY_CONFIG)
+                await mqc.publish_string("homeassistant/sensor/picopower/state", str(pulse_counter))
                 await asyncio.sleep(MQTT_PUBLISH_EVERY_SECS)
 
         except Exception as ex:
             if mqc:
                 try:
-                    mqc.sock.close()
-                except Exception:
-                    pass
+                    await mqc.disconnect()
+                    send_syslog("MQTT disconnected cleanly")
+                except Exception as disconnect_ex:
+                    send_syslog(f"MQTT disconnect error: {disconnect_ex}")
                 mqc = None
-            send_syslog(f"MQTT error: {ex}")
+            send_syslog(f"MQTT error: {ex}, reconnecting in 5 seconds")
             await asyncio.sleep(5)
 
 
@@ -104,19 +108,23 @@ async def main():
 time.sleep(5)
 def do_connect():
     rp2.country('GB')
+    print("WiFi: Setting country code to GB")
 
     sta_if = network.WLAN(network.STA_IF)
     if not sta_if.isconnected():
-        print('connecting to network...')
+        print(f"WiFi: Connecting to {cfgsecrets.WIFI_SSID}")
         sta_if.active(True)
         sta_if.connect(cfgsecrets.WIFI_SSID, cfgsecrets.WIFI_PASSWORD)
         while not sta_if.isconnected():
-            print("Attempting to connect....")
+            print("WiFi: Attempting to connect...")
             utime.sleep(1)
-    print('Connected! Network config:', sta_if.ifconfig())
+    config = sta_if.ifconfig()
+    print(f"WiFi: Connected! IP={config[0]}, Netmask={config[1]}, Gateway={config[2]}, DNS={config[3]}")
+    send_syslog(f"WiFi connected: IP={config[0]}")
 
-print("Connecting to your wifi...")
-do_connect()
+if __name__ == "__main__":
+    do_connect()
 
-time.sleep(5)
-asyncio.run(main())
+    send_syslog("Application starting: Pico Power Monitor v1.0")
+    time.sleep(5)
+    asyncio.run(main())
