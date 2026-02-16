@@ -6,6 +6,10 @@ from umqtt.robust import MQTTClient
 import cfgsecrets
 import socket
 import time
+import network
+import utime
+import rp2
+
 
 LIGHT_SENSOR_I2C_ADDRESS = 0x23
 LIGHT_SENSOR_PULSE_THRESHOLD = 40
@@ -117,4 +121,22 @@ async def main():
     ]
     await asyncio.gather(*what)
 
+time.sleep(5)
+def do_connect():
+    rp2.country('GB')
+
+    sta_if = network.WLAN(network.STA_IF)
+    if not sta_if.isconnected():
+        print('connecting to network...')
+        sta_if.active(True)
+        sta_if.connect(cfgsecrets.WIFI_SSID, cfgsecrets.WIFI_PASSWORD)
+        while not sta_if.isconnected():
+            print("Attempting to connect....")
+            utime.sleep(1)
+    print('Connected! Network config:', sta_if.ifconfig())
+
+print("Connecting to your wifi...")
+do_connect()
+
+time.sleep(5)
 asyncio.run(main())
