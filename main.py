@@ -28,26 +28,6 @@ ENERGY_CONFIG = json.dumps({"device_class": "energy",
 
 pulse_counter = 0
 
-
-def send_syslog(message, port=514, hostname="picopower", appname="main", procid="-", msgid="-"):
-    print(message)
-
-    syslog_addr = ('255.255.255.255', port)
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-    pri = 13  # user.notice
-    version = 1
-    timestamp = time.strftime("%Y-%m-%dT%H:%M:%S%z")
-    # If timezone is missing, add 'Z' for UTC
-    if not timestamp.endswith('Z') and not timestamp[-5:].startswith(('+', '-')):
-        timestamp += 'Z'
-    syslog_msg = f"<{pri}>{version} {timestamp} {hostname} {appname} {procid} {msgid} - {message}".encode('utf-8')
-    try:
-        sock.sendto(syslog_msg, syslog_addr)
-    finally:
-        sock.close()
-
-
 async def sensor():
     global pulse_counter
 
