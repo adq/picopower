@@ -121,10 +121,8 @@ def do_connect():
     config = sta_if.ifconfig()
     print(f"WiFi: Connected! IP={config[0]}, Netmask={config[1]}, Gateway={config[2]}, DNS={config[3]}")
     send_syslog(f"WiFi connected: IP={config[0]}")
+do_connect()
 
-if __name__ == "__main__":
-    do_connect()
-
-    send_syslog("Application starting: Pico Power Monitor v1.0")
-    time.sleep(5)
-    asyncio.run(main())
+send_syslog("Application starting: Pico Power Monitor v1.0")
+time.sleep(5)
+asyncio.run(main())
