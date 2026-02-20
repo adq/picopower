@@ -58,10 +58,12 @@ async def sensor():
                     pulse_counter += 1
                     current_state = 1
                     led.on()
+                    print("Pulse ON")
 
                 elif v < LIGHT_SENSOR_PULSE_THRESHOLD and current_state:
                     current_state = 0
                     led.off()
+                    print("Pulse OFF")
 
                 await asyncio.sleep_ms(SENSOR_SLEEP_INTERVAL_MS)
 
