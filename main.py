@@ -11,8 +11,53 @@ import utime
 import rp2
 
 
-LIGHT_SENSOR_I2C_ADDRESS = 0x23
+LIGHT_SENSOR_I2C_ADDRESS = 0x29
 LIGHT_SENSOR_PULSE_THRESHOLD = 40
+
+# TSL2591 registers
+TSL2591_COMMAND_BIT = 0xA0
+TSL2591_REG_ENABLE = 0x00
+TSL2591_REG_CONFIG = 0x01
+TSL2591_REG_ID = 0x12
+TSL2591_REG_STATUS = 0x13
+TSL2591_REG_C0DATAL = 0x14
+
+# ENABLE register: PON (bit 0) + AEN (bit 1)
+TSL2591_ENABLE_POWERON = 0x01
+TSL2591_ENABLE_AEN = 0x02
+
+# CONFIG register: AGAIN (bits 5:4), ATIME (bits 2:0)
+TSL2591_GAIN_LOW = 0x00    # 1x
+TSL2591_ATIME_100MS = 0x00 # 100ms, fastest
+
+
+def tsl2591_write(i2c, reg, value):
+    i2c.writeto(LIGHT_SENSOR_I2C_ADDRESS, bytes([TSL2591_COMMAND_BIT | reg, value]))
+
+
+def tsl2591_read(i2c, reg, count):
+    i2c.writeto(LIGHT_SENSOR_I2C_ADDRESS, bytes([TSL2591_COMMAND_BIT | reg]))
+    return i2c.readfrom(LIGHT_SENSOR_I2C_ADDRESS, count)
+
+
+def tsl2591_init(i2c):
+    # verify chip ID
+    chip_id = tsl2591_read(i2c, TSL2591_REG_ID, 1)
+    if chip_id[0] != 0x50:
+        raise RuntimeError(f"TSL2591 not found, got ID 0x{chip_id[0]:02x}")
+
+    # power on + enable ALS
+    tsl2591_write(i2c, TSL2591_REG_ENABLE, TSL2591_ENABLE_POWERON | TSL2591_ENABLE_AEN)
+
+    # configure gain=Low(1x), integration time=100ms
+    tsl2591_write(i2c, TSL2591_REG_CONFIG, (TSL2591_GAIN_LOW << 4) | TSL2591_ATIME_100MS)
+
+
+def tsl2591_read_ch0(i2c):
+    # read all 4 data bytes starting at C0DATAL to minimise skew
+    data = tsl2591_read(i2c, TSL2591_REG_C0DATAL, 4)
+    ch0 = data[0] | (data[1] << 8)
+    return ch0
 
 MQTT_PUBLISH_EVERY_SECS = 30
 SENSOR_SLEEP_INTERVAL_MS = 100
@@ -43,15 +88,13 @@ async def sensor():
         try:
             led.off()
 
-            # continuous measurement, low resolution mode, 4lx, ~16ms measurement time
-            i2c.writeto(LIGHT_SENSOR_I2C_ADDRESS, bytes([0x13]))
-            send_syslog("Sensor started: continuous measurement mode")
+            tsl2591_init(i2c)
+            send_syslog("Sensor started: TSL2591 gain=Low atime=100ms")
 
             current_state = 0
             while True:
-                # read from sensor
-                b = i2c.readfrom(LIGHT_SENSOR_I2C_ADDRESS, 2)
-                v = (b[0] << 8) | b[1]
+                # read CH0 (visible+IR) from sensor
+                v = tsl2591_read_ch0(i2c)
 
                 # detect+count pulses!
                 if v >= LIGHT_SENSOR_PULSE_THRESHOLD and not current_state:
