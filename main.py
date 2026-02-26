@@ -27,7 +27,7 @@ TSL2591_ENABLE_POWERON = 0x01
 TSL2591_ENABLE_AEN = 0x02
 
 # CONFIG register: AGAIN (bits 5:4), ATIME (bits 2:0)
-TSL2591_GAIN_LOW = 0x00    # 1x
+TSL2591_GAIN_MEDIUM = 0x01    # 2x
 TSL2591_ATIME_100MS = 0x00 # 100ms, fastest
 
 
@@ -50,7 +50,7 @@ def tsl2591_init(i2c):
     tsl2591_write(i2c, TSL2591_REG_ENABLE, TSL2591_ENABLE_POWERON | TSL2591_ENABLE_AEN)
 
     # configure gain=Low(1x), integration time=100ms
-    tsl2591_write(i2c, TSL2591_REG_CONFIG, (TSL2591_GAIN_LOW << 4) | TSL2591_ATIME_100MS)
+    tsl2591_write(i2c, TSL2591_REG_CONFIG, (TSL2591_GAIN_MEDIUM << 4) | TSL2591_ATIME_100MS)
 
 
 def tsl2591_read_ch0(i2c):
@@ -107,6 +107,9 @@ async def sensor():
                     current_state = 0
                     led.off()
                     print("Pulse OFF")
+
+#                else:
+#                    print(v)
 
                 await asyncio.sleep_ms(SENSOR_SLEEP_INTERVAL_MS)
 
